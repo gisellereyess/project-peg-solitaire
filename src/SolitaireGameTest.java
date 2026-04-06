@@ -18,7 +18,7 @@ public class SolitaireGameTest {
 
   @BeforeEach
   public void setUp() {
-    game = new SolitaireGame(7, SolitaireGame.BoardType.ENGLISH);
+    game = new ManualGame(7, SolitaireGame.BoardType.ENGLISH);
   }
 
   // =========================================================================
@@ -64,7 +64,7 @@ public class SolitaireGameTest {
   /** Diamond board center cell must be EMPTY after initialization. */
   @Test
   public void testDiamondCenterEmptyAfterInit() {
-    SolitaireGame diamondGame = new SolitaireGame(7, SolitaireGame.BoardType.DIAMOND);
+    SolitaireGame diamondGame = new ManualGame(7, SolitaireGame.BoardType.DIAMOND);
     int[][] board = diamondGame.getBoard();
     assertEquals(SolitaireGame.EMPTY, board[3][3],
         "Diamond board center should be EMPTY");
@@ -73,7 +73,7 @@ public class SolitaireGameTest {
   /** Hexagon board center cell must be EMPTY after initialization. */
   @Test
   public void testHexagonCenterEmptyAfterInit() {
-    SolitaireGame hexGame = new SolitaireGame(7, SolitaireGame.BoardType.HEXAGON);
+    SolitaireGame hexGame = new ManualGame(7, SolitaireGame.BoardType.HEXAGON);
     int[][] board = hexGame.getBoard();
     assertEquals(SolitaireGame.EMPTY, board[3][3],
         "Hexagon board center should be EMPTY");
@@ -195,7 +195,7 @@ public class SolitaireGameTest {
   /** A 5×5 Diamond board has valid moves at start as well. */
   @Test
   public void testDiamondGameNotOverAtStart() {
-    SolitaireGame diamondGame = new SolitaireGame(5, SolitaireGame.BoardType.DIAMOND);
+    SolitaireGame diamondGame = new ManualGame(5, SolitaireGame.BoardType.DIAMOND);
     assertFalse(diamondGame.isGameOver(),
         "Diamond game should not be over at start");
   }
@@ -208,5 +208,47 @@ public class SolitaireGameTest {
     int[][] original = game.getBoard();
     assertEquals(SolitaireGame.EMPTY, original[3][3],
         "Mutating getBoard() copy should not change the actual board");
+  }
+
+  // =========================================================================
+// User Story 6 & 7: Automated game
+// =========================================================================
+
+  /** AutomatedGame should start with the same peg count as ManualGame. */
+  @Test
+  public void testAutomatedGameInitialPegCount() {
+    AutomatedGame autoGame = new AutomatedGame(7, SolitaireGame.BoardType.ENGLISH);
+    assertEquals(32, autoGame.getPegCount(),
+            "Automated game should start with 32 pegs");
+  }
+
+  /** autoMove() should return true and decrease peg count by 1. */
+  @Test
+  public void testAutoMoveDecreasesPegCount() {
+    AutomatedGame autoGame = new AutomatedGame(7, SolitaireGame.BoardType.ENGLISH);
+    int before = autoGame.getPegCount();
+    boolean moved = autoGame.autoMove();
+    assertTrue(moved, "autoMove should return true when moves are available");
+    assertEquals(before - 1, autoGame.getPegCount(),
+            "Peg count should decrease by 1 after autoMove");
+  }
+
+  /** autoMove() should return false when no moves are available. */
+  @Test
+  public void testAutoMoveReturnsFalseWhenGameOver() {
+    AutomatedGame autoGame = new AutomatedGame(7, SolitaireGame.BoardType.ENGLISH);
+    while (!autoGame.isGameOver()) {
+      autoGame.autoMove();
+    }
+    assertFalse(autoGame.autoMove(),
+            "autoMove should return false when game is over");
+  }
+
+  /** AutomatedGame should not be over at the start. */
+  @Test
+  public void testAutomatedGameNotOverAtStart() {
+    AutomatedGame autoGame = new AutomatedGame(7, SolitaireGame.BoardType.ENGLISH);
+    assertFalse(autoGame.isGameOver(),
+            "Automated game should not be over at start");
   }
 }
