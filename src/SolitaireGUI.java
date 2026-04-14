@@ -47,6 +47,9 @@ public class SolitaireGUI extends Application {
   private ToggleGroup      boardTypeGroup;
   private RadioButton      rbManual, rbAutomated;
   private ToggleGroup      gameModeGroup;
+  private CheckBox recordCheckBox;
+  private GameLogger gameLogger = new GameLogger();
+  private GamePlays gamePlays = new GamePlays();
 
   // ── Game state ────────────────────────────────────────────────────────────
   private SolitaireGame    game;
@@ -114,7 +117,7 @@ public class SolitaireGUI extends Application {
 
     Label sizeLabel = panelLabel("Board Size:");
     sizeSpinner = new Spinner<>(
-        new SpinnerValueFactory.IntegerSpinnerValueFactory(5, 9, 7, 2));
+            new SpinnerValueFactory.IntegerSpinnerValueFactory(5, 9, 7, 2));
     sizeSpinner.setPrefWidth(100);
     sizeSpinner.setStyle("-fx-font-size: 13; -fx-font-family: Georgia;");
 
@@ -126,21 +129,27 @@ public class SolitaireGUI extends Application {
 
     Label modeLabel = panelLabel("Game Mode:");
     gameModeGroup = new ToggleGroup();
+    recordCheckBox = new CheckBox("Record game");
+    recordCheckBox.setTextFill(Color.web("#e8d5e0"));
+    recordCheckBox.setFont(Font.font("Georgia", 13));
     rbManual = styledModeRadio("Manual", true);
     rbAutomated = styledModeRadio("Automated", false);
 
     Button newGameBtn  = buildButton("New Game",  "#8b5e7a", e -> startNewGame());
     Button autoplayBtn = buildButton("Autoplay",  "#5e7a8b", e -> startAutoplay());
     Button randomizeBtn = buildButton("Randomize", "#5e8b6a", e -> randomizeBoard());
+    Button replayBtn = buildButton("Replay", "#8b7a5e", e -> startReplay());
 
     panel.getChildren().addAll(
-        sizeLabel, sizeSpinner,
-        new Separator(),
-        typeLabel, rbEnglish, rbHexagon, rbDiamond,
-        new Separator(),
-        modeLabel, rbManual, rbAutomated,
-        new Separator(),
-        newGameBtn, autoplayBtn, randomizeBtn
+            sizeLabel, sizeSpinner,
+            new Separator(),
+            typeLabel, rbEnglish, rbHexagon, rbDiamond,
+            new Separator(),
+            modeLabel, rbManual, rbAutomated,
+            new Separator(),
+            recordCheckBox,
+            new Separator(),
+            newGameBtn, autoplayBtn, randomizeBtn, replayBtn
     );
     return panel;
   }
@@ -175,8 +184,8 @@ public class SolitaireGUI extends Application {
     Button btn = new Button(text);
     btn.setPrefWidth(135);
     btn.setStyle("-fx-background-color: " + color + ";"
-        + "-fx-text-fill: white; -fx-font-size: 14;"
-        + "-fx-font-family: Georgia; -fx-background-radius: 6; -fx-cursor: hand;");
+            + "-fx-text-fill: white; -fx-font-size: 14;"
+            + "-fx-font-family: Georgia; -fx-background-radius: 6; -fx-cursor: hand;");
     btn.setOnAction(handler);
     return btn;
   }
@@ -189,10 +198,17 @@ public class SolitaireGUI extends Application {
     int size = sizeSpinner.getValue();
     SolitaireGame.BoardType type = getSelectedBoardType();
     game = rbAutomated.isSelected()
-        ? new AutomatedGame(size, type)
-        : new ManualGame(size, type);
+            ? new AutomatedGame(size, type)
+            : new ManualGame(size, type);
     clearSelection();
-    setStatus("New game started!  Pegs on board: " + game.getPegCount());
+
+    // Start recording if checkbox is checked
+    if (recordCheckBox.isSelected()) {
+      gameLogger.startRecording("solitaire_recording.txt", size, type);
+      setStatus("New game started and recording!  Pegs: " + game.getPegCount());
+    } else {
+      setStatus("New game started!  Pegs on board: " + game.getPegCount());
+    }
     drawBoard();
   }
 
@@ -202,12 +218,20 @@ public class SolitaireGUI extends Application {
       return;
     }
     AutomatedGame ag = (AutomatedGame) game;
-    Timeline timeline = new Timeline(new KeyFrame(Duration.millis(500), event -> {
+    final Timeline timeline = new Timeline();
+    timeline.getKeyFrames().add(new KeyFrame(Duration.millis(500), event -> {
       boolean moved = ag.autoMove();
       drawBoard();
+      if (moved && gameLogger.isActive()) {
+        int[] last = ag.getLastMove();
+        if (last != null)
+          gameLogger.logMove(last[0], last[1], last[2], last[3]);
+      }
       if (!moved || game.isGameOver()) {
+        gameLogger.stopRecording();
         setStatus("Automated game over! Pegs remaining: "
-            + game.getPegCount() + getRatingText(game.getPegCount()));
+                + game.getPegCount() + getRatingText(game.getPegCount()));
+        timeline.stop();
       } else {
         setStatus("Auto move made! Pegs remaining: " + game.getPegCount());
       }
@@ -235,6 +259,7 @@ public class SolitaireGUI extends Application {
     clearSelection();
     setStatus("Board randomized! Pegs: " + game.getPegCount());
     drawBoard();
+    gameLogger.logRandomize();
   }
 
   private SolitaireGame.BoardType getSelectedBoardType() {
@@ -242,7 +267,49 @@ public class SolitaireGUI extends Application {
     if (rbDiamond.isSelected()) return SolitaireGame.BoardType.DIAMOND;
     return SolitaireGame.BoardType.ENGLISH;
   }
+  private void startReplay() {
+    boolean loaded = gamePlays.loadGame("solitaire_recording.txt");
+    if (!loaded) {
+      setStatus("No recording found! Play and record a game first.");
+      return;
+    }
 
+    // Set up a fresh game with the recorded board settings
+    game = new ManualGame(gamePlays.getSize(), gamePlays.getBoardType());
+    clearSelection();
+    drawBoard();
+    setStatus("Replaying recorded game...");
+
+    // Replay each move with a delay so you can watch it
+    List<String> moves = gamePlays.getMoves();
+    Timeline timeline = new Timeline();
+
+    for (int i = 0; i < moves.size(); i++) {
+      final String move = moves.get(i);
+      final int step = i;
+      timeline.getKeyFrames().add(new KeyFrame(Duration.millis(700 * (step + 1)), event -> {
+        if (move.equals("RANDOMIZE")) {
+          randomizeBoard();
+          setStatus("Replaying... randomize applied");
+        } else {
+          // Parse MOVE:fromRow,fromCol,toRow,toCol
+          String[] parts = move.substring(5).split(",");
+          int fromRow = Integer.parseInt(parts[0]);
+          int fromCol = Integer.parseInt(parts[1]);
+          int toRow   = Integer.parseInt(parts[2]);
+          int toCol   = Integer.parseInt(parts[3]);
+          game.makeMove(fromRow, fromCol, toRow, toCol);
+          setStatus("Replaying... pegs remaining: " + game.getPegCount());
+        }
+        drawBoard();
+        if (step == moves.size() - 1) {
+          setStatus("Replay complete! Pegs remaining: "
+                  + game.getPegCount() + getRatingText(game.getPegCount()));
+        }
+      }));
+    }
+    timeline.play();
+  }
   private void handleCellClick(int row, int col) {
     if (game.isGameOver()) return;
     if (!game.isValidCell(row, col)) return;
@@ -255,10 +322,11 @@ public class SolitaireGUI extends Application {
       String key = row + "," + col;
       if (validDests.contains(key)) {
         game.makeMove(selectedRow, selectedCol, row, col);
+        gameLogger.logMove(selectedRow, selectedCol, row, col);
         clearSelection();
         if (game.isGameOver()) {
           setStatus("Game Over!  Pegs remaining: " + game.getPegCount()
-              + getRatingText(game.getPegCount()));
+                  + getRatingText(game.getPegCount()));
         } else {
           setStatus("Move made!  Pegs remaining: " + game.getPegCount());
         }
@@ -281,7 +349,7 @@ public class SolitaireGUI extends Application {
       clearSelection();
     } else {
       setStatus("Peg selected at (" + row + ", " + col
-          + ").  Click a highlighted hole to move.");
+              + ").  Click a highlighted hole to move.");
     }
   }
 
@@ -331,7 +399,7 @@ public class SolitaireGUI extends Application {
 
         gc.setFill(Color.web(CELL_BG));
         gc.fillOval(cx - cellSize * 0.44, cy - cellSize * 0.44,
-                    cellSize * 0.88, cellSize * 0.88);
+                cellSize * 0.88, cellSize * 0.88);
 
         if (board[r][c] == SolitaireGame.PEG) {
           drawPeg(gc, cx, cy, radius, isSelected);
@@ -350,7 +418,7 @@ public class SolitaireGUI extends Application {
     gc.fillOval(cx - radius, cy - radius, radius * 2, radius * 2);
     gc.setFill(Color.web(selected ? SEL_SHINE : PEG_SHINE, 0.55));
     gc.fillOval(cx - radius * 0.52, cy - radius * 0.58,
-                radius * 0.68, radius * 0.48);
+            radius * 0.68, radius * 0.48);
     gc.setStroke(Color.web(selected ? "#c04070" : "#a87a9a", 0.7));
     gc.setLineWidth(1.2);
     gc.strokeOval(cx - radius, cy - radius, radius * 2, radius * 2);
@@ -359,17 +427,17 @@ public class SolitaireGUI extends Application {
   private void drawValidDest(GraphicsContext gc, double cx, double cy, double radius) {
     gc.setFill(Color.web(DEST_COLOR, 0.85));
     gc.fillOval(cx - radius * 0.55, cy - radius * 0.55,
-                radius * 1.1, radius * 1.1);
+            radius * 1.1, radius * 1.1);
     gc.setStroke(Color.web("#c090b0", 0.9));
     gc.setLineWidth(1.5);
     gc.strokeOval(cx - radius * 0.55, cy - radius * 0.55,
-                  radius * 1.1, radius * 1.1);
+            radius * 1.1, radius * 1.1);
   }
 
   private void drawHole(GraphicsContext gc, double cx, double cy, double radius) {
     gc.setFill(Color.web(HOLE_COLOR));
     gc.fillOval(cx - radius * 0.4, cy - radius * 0.4,
-                radius * 0.8, radius * 0.8);
+            radius * 0.8, radius * 0.8);
   }
 
   public static void main(String[] args) { launch(args); }
